@@ -2,6 +2,7 @@ library(tidyverse)
 library(fs)
 library(lubridate)
 library(e1071)
+library(glue)
 
 csv_files <- dir_ls('csse_covid_19_data/csse_covid_19_daily_reports/')
 csv_files <- csv_files[!str_detect(csv_files, 'README')]
@@ -59,7 +60,7 @@ modeling_data <-
   summaries %>% 
   mutate(confirmed = log(confirmed)) %>% 
   filter(
-    file_name >= Sys.Date() - 7 * 2 
+    file_name >= Sys.Date() - 7 * 2
   )
 
 model <- lm(
@@ -69,20 +70,64 @@ model <- lm(
 
 print(yesterday)
 
-future_days <- tibble(day = 30:(yesterday + 15))
+future_days <- 
+  tibble(
+    day = 30:(yesterday + 15)
+  )
 
 future_days$confirmed <- predict(
   model, 
   future_days
 ) 
 
-modeling_data$prediction = TRUE
-future_days$prediction = FALSE
+modeling_data$prediction = 'Actual'
+future_days$prediction = 'Predicted'
 
-combined_data <- 
-  bind_rows(modeling_data, future_days)
+combined_data <-
+  bind_rows(modeling_data, future_days) %>% 
+    mutate(
+      day = day - yesterday - 1,
+      file_name = Sys.Date() + day
+    ) %>% 
+  filter(
+    file_name > Sys.Date() - 7 * 2
+  ) %>% 
+  mutate(
+    confirmed = exp(confirmed)
+  )
 
 
 ggplot(combined_data) +
-  aes(x = day, y  = exp(confirmed), colour = prediction) +
-  geom_line()
+  aes(x = file_name, y  = log(confirmed), colour = prediction) +
+  geom_line(size = 1)  +
+  geom_point(size = 1) +
+  xlab('Date') +
+  ylab('Confirmed (log)') +
+  ggtitle(
+    'COVID-19 Predicted v. Actual on Log Scale'
+  )
+
+
+ggplot(combined_data) +
+  aes(x = file_name, y  = confirmed, colour = prediction) +
+  geom_line(size = 1)  +
+  geom_point(size = 1) +
+  xlab('Date') +
+  ylab('Confirmed (Actual)')+
+  ggtitle(
+    'COVID-19 Predicted v. Actual'
+  )
+
+final_solution <- 
+  combined_data %>% 
+  arrange(
+    file_name, prediction
+  ) %>% 
+  select(
+    file_name, confirmed, prediction
+  ) %>% 
+  as.data.frame
+  
+write.csv(
+  final_solution, glue("{Sys.Date()}.csv")
+)
