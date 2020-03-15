@@ -1,6 +1,7 @@
 library(tidyverse)
 library(fs)
 library(lubridate)
+library(e1071)
 
 csv_files <- dir_ls('csse_covid_19_data/csse_covid_19_daily_reports/')
 csv_files <- csv_files[!str_detect(csv_files, 'README')]
@@ -18,6 +19,7 @@ data <-
     csv_data
   })
 
+# Clean up the data
 data <- 
   data %>% 
   rename(
@@ -29,22 +31,58 @@ data <-
     recovered = Recovered
   ) %>% 
   mutate(
-    last_update = as.Date(last_update, '%m/%d/%Y'),
     confirmed = as.numeric(confirmed),
     deaths = as.numeric(deaths),
     recovered = as.numeric(recovered)
   ) %>% 
-  mutate_if(is.numeric, ~ if_else(is.na(.), as.numeric(0), .))
+  mutate_if(is.numeric, ~ if_else(is.na(.), as.numeric(0), .)) %>% 
+  select(-last_update)
 
 
-data %>% 
+summaries <- 
+  data %>% 
+  filter(country == 'US') %>% 
   group_by(file_name, country) %>% 
   summarise_if(is.numeric, sum) %>%
   ungroup %>% 
-  ggplot() +
-  aes(x = file_name, y = log(confirmed), colour = country) +
-  geom_line() +
-  theme(legend.position = 'none')
+  mutate(
+    day = row_number()
+  )
+
+yesterday <- 
+  summaries %>% 
+  filter(file_name == Sys.Date() - 1) %>% 
+  pull(day)
 
 
-  
+modeling_data <- 
+  summaries %>% 
+  mutate(confirmed = log(confirmed)) %>% 
+  filter(
+    file_name >= Sys.Date() - 7 * 2 
+  )
+
+model <- lm(
+  confirmed ~ day, data = modeling_data
+)
+
+
+print(yesterday)
+
+future_days <- tibble(day = 30:(yesterday + 15))
+
+future_days$confirmed <- predict(
+  model, 
+  future_days
+) 
+
+modeling_data$prediction = TRUE
+future_days$prediction = FALSE
+
+combined_data <- 
+  bind_rows(modeling_data, future_days)
+
+
+ggplot(combined_data) +
+  aes(x = day, y  = exp(confirmed), colour = prediction) +
+  geom_line()
